@@ -2,49 +2,110 @@
 
 凡是涉及钉钉的操作一律使用此 skill。能力覆盖：发消息/建群/拉人进群/机器人群发/Webhook/单聊/撤回消息、约会议/查日程/订会议室/查闲忙/加参会人、建表/查记录/写数据/AI表格/多维表、搜同事/查部门/通讯录/找人/查上级/查下级/谁负责/负责人是谁/团队成员/查工号/查手机号、写文档/读文档/知识库/上传文件到文档、创建待办/TODO/任务提醒、发邮件/查邮件、听记/会议录音/AI摘要、创建应用/生成系统/做工具/管理后台、审批/OA/同意/拒绝、写日报/提交周报/查日志、上传下载文件/钉盘、查考勤/打卡/排班、DING紧急消息、预约视频会议、查直播、搜索技能/安装技能/发布技能/技能市场/企业技能库。
 
-## CLI 定位（每次会话首次使用前执行一次）
+## 执行架构
 
-`dws.exe` 随 Wukong 安装，路径因机器/版本而异，**必须动态探测**，禁止硬编码路径。
+```
+Claude Code
+    ↓  自然语言任务描述
+wukong-cli.exe  ←→  \\.\pipe\real-daemon（Wukong 守护进程）
+    ↓  内部调用 dws 工具
+钉钉 API
+```
 
-按以下顺序探测，找到即停止：
+dws 的认证由 Wukong 守护进程自动管理，**不需要也不要直接调用 dws.exe**。所有钉钉操作通过 `wukong-cli` 下发自然语言任务完成。
 
-**步骤 1：直接调用**
+## 前置条件
+
+**Wukong（悟空）桌面端必须处于运行状态**，守护进程管道 `\\.\pipe\real-daemon` 才存在。
+
+检查是否就绪：
 ```powershell
-dws --version
+[System.IO.Directory]::GetFiles("\\.\pipe\") | Where-Object { $_ -match "real-daemon" }
 ```
-成功则直接用 `dws`。
+有输出则就绪；无输出则告知用户启动 Wukong 桌面端并登录钉钉账号。
 
-**步骤 2：PowerShell 注册表查找**
+## 工具定位（每次会话首次使用前执行一次）
+
+`wukong-cli.exe` 随 Wukong 安装，路径因机器/版本而异，**必须动态探测**。
+
 ```powershell
-$p = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall","HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue |
-  Get-ItemProperty | Where-Object { $_.DisplayName -like "*Wukong*" -or $_.DisplayName -like "*悟空*" } |
-  Select-Object -ExpandProperty InstallLocation -First 1
-if ($p) { Get-ChildItem $p -Recurse -Filter "dws.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName }
+# 步骤1：直接调用
+$wkcli = $null
+if (Get-Command wukong-cli -ErrorAction SilentlyContinue) { $wkcli = "wukong-cli" }
+
+# 步骤2：注册表查找
+if (-not $wkcli) {
+    $installDir = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                               "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" `
+        -ErrorAction SilentlyContinue | Get-ItemProperty |
+        Where-Object { $_.DisplayName -like "*Wukong*" -or $_.DisplayName -like "*悟空*" } |
+        Select-Object -ExpandProperty InstallLocation -First 1
+    if ($installDir) {
+        $found = Get-ChildItem $installDir -Recurse -Filter "wukong-cli.exe" -ErrorAction SilentlyContinue |
+                 Select-Object -First 1 -ExpandProperty FullName
+        if ($found) { $wkcli = $found }
+    }
+}
+
+# 步骤3：文件系统扫描
+if (-not $wkcli) {
+    $wkcli = Get-ChildItem "$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:LOCALAPPDATA" `
+        -Recurse -Filter "wukong-cli.exe" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -like "*Wukong*" } |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+
+if (-not $wkcli) { Write-Host "未找到 wukong-cli.exe，请确认已安装 Wukong 桌面端" }
 ```
 
-**步骤 3：文件系统扫描**
+找到后，变量 `$wkcli` 即为后续所有调用的入口。
+
+## 执行命令（标准模板）
+
+所有钉钉操作统一使用以下模板：
+
 ```powershell
-Get-ChildItem "$env:ProgramFiles","${env:ProgramFiles(x86)}","$env:LOCALAPPDATA","$env:APPDATA" -Recurse -Filter "dws.exe" -ErrorAction SilentlyContinue |
-  Where-Object { $_.DirectoryName -like "*Wukong*" } |
-  Select-Object -First 1 -ExpandProperty FullName
+$result = & $wkcli --socket "\\.\pipe\real-daemon" `
+    -p "<任务描述>" `
+    --output-format json `
+    --max-turns <N> `
+    2>&1 | Select-Object -First 20
+$output = ($result | ConvertFrom-Json).output_text
 ```
 
-找到路径后，后续所有命令用该路径（含空格时加引号）。若三步均失败，告知用户安装 Wukong 或确认 dws.exe 位置。
+**参数说明：**
+- `-p "<任务描述>"` — 用清晰的中文描述任务，包含所有关键参数（节点ID、关键词、时间范围等）
+- `--max-turns <N>` — 单步查询用 `3`，多步/汇总操作用 `5`，复杂批量操作用 `8`
+- `| Select-Object -First 20` — 必须加，防止大量输出时流阻塞
 
-## 认证说明
+**任务描述写法示例：**
+```
+# 读文档
+-p "读取钉钉文档节点ID为Obva6QBXJw0yzeOdC24g0zol8n4qY5Pr的完整内容"
 
-若收到 `not_authenticated` 错误，告知用户运行以下命令完成一次性登录（`<dws>` 替换为上面探测到的实际路径）：
+# 搜索
+-p "在钉钉文档中搜索关键词'会议纪要'，返回最近10条结果的标题和链接"
+
+# 发消息
+-p "向钉钉用户ID为xxx的人发送消息：今天下午3点开会"
+
+# 查日程
+-p "查询我今天的所有日历日程，返回标题、时间、参与人"
+
+# 查待办
+-p "列出我所有未完成的待办任务，按截止时间排序"
 ```
-"<dws>" auth login
-```
-登录后 token 自动保存，无需重复操作。若遇 `AUTH_TOKEN_EXPIRED` / `USER_TOKEN_ILLEGAL` 错误，直接重试命令（最多两次），系统自动刷新。
+
+**结果处理：**
+- `$output` 是自然语言描述的结果，直接呈现给用户或继续解析
+- 若需要 ID 等结构化数据，在任务描述中明确要求返回 JSON 格式
+- 若 `status` 为 `finished` 且 `output_text` 有内容，表示成功
 
 ## 参考文档位置（动态解析）
 
-`dws-refs/` 和 `dws-scripts/` 与本 skill 文件同级。每次会话首次使用时，用以下 PowerShell 命令定位 skill 目录，后续路径均基于此：
+`dws-refs/` 与本 skill 文件同级，用于了解各产品能力边界。
 
 ```powershell
-# 优先查全局 skill 目录，其次查项目级
 $skillDir = $null
 $candidates = @(
     (Join-Path $env:USERPROFILE ".claude\skills"),
@@ -53,89 +114,63 @@ $candidates = @(
 foreach ($c in $candidates) {
     if (Test-Path (Join-Path $c "dws.md")) { $skillDir = $c; break }
 }
-$dwsRefs    = Join-Path $skillDir "dws-refs"
-$dwsScripts = Join-Path $skillDir "dws-scripts"
+$dwsRefs = Join-Path $skillDir "dws-refs"
 ```
 
-目录结构：
-- `$dwsRefs\products\*.md` — 各产品命令详细用法
-- `$dwsRefs\global-reference.md` — 全局标志说明
-- `$dwsRefs\capability-limits.md` — 已知不支持的操作
-- `$dwsRefs\url-patterns.md` — URL 模板规范
-- `$dwsRefs\field-rules.md` — 字段规则
-- `$dwsRefs\intent-guide.md` — 易混淆意图指南
-- `$dwsRefs\best_practices\` — 多步操作行动指南
-- `$dwsScripts\*.py` — 辅助脚本（支持 `--dry-run` 和 `--format json`）
+参考文档用途（只读，不用于构造命令）：
+- `$dwsRefs\products\*.md` — 了解各产品支持哪些操作，帮助写出精准的任务描述
+- `$dwsRefs\capability-limits.md` — 确认某操作是否在能力范围内
+- `$dwsRefs\intent-guide.md` — 易混淆场景区分
 
 ## 严格要求 (MUST DO)
 
-- 执行 `dws` 前必须用参考文档确认命令；产品参考已覆盖时直接执行，缺失或不确定时必须先用 `--help` 查证
-- 多步/汇总类先匹配「行动指南」(`best_practices/`)；单产品操作匹配「产品路由表」
-- 进入产品后读取对应 `dws-refs/products/*.md`，以其中 `Usage` / `Example` / `Flags` 为命令依据
-- 产品参考缺失、路径/flag 不确定，或报 `unknown command` / `unknown flag` 时，必须先运行 `dws <path> --help` 查证后再执行
-- 所有命令必须加 `--format json` 以获取可解析输出
-- 危险操作必须先向用户确认，用户同意后才加 `--yes` 执行
-- 单次批量操作不超过 30 条记录
-- URL 必须从产品参考或 `url-patterns.md` 中查找模板，或使用命令返回的完整链接，无法获取时告知用户
-- Email/手机号必须从命令返回中提取或由用户明确提供，无法获取时主动询问
-- 拿到多个 ID 后，所有按 ID 查详情的命令**必须合并到同一批次并行调用**（`&` + `wait`），严禁逐条串行
-- **脚本优先**：recipe 步骤中标注「优先」的脚本用 `python "$dwsScripts\<name>.py"` 调用（`$dwsScripts` 为上面动态解析的路径）
+- 执行前先检查 `\\.\pipe\real-daemon` 是否存在
+- 任务描述必须具体，包含所有必要的 ID / 关键词 / 时间范围
+- 需要 ID 时，先执行查询步骤获取，再执行操作步骤；禁止编造 ID
+- 危险操作（删除/发送 DING/审批）必须先向用户展示摘要并获得确认
+- 单次批量操作描述不超过 30 条记录
+- 不确定某产品是否支持某操作时，查阅 `$dwsRefs\capability-limits.md`
 
 ## 严格禁止 (NEVER DO)
 
-- 不要使用 dws 命令以外的方式操作（禁止 curl、HTTP API、浏览器）
-- 不要编造 UUID、ID 等标识符，必须从命令返回中提取
-- 不要编造 URL、Email、手机号等结构化信息，禁止猜测
-- 不要猜测字段名/参数值，操作前必须先查询确认
-- 禁止编造命令路径、子命令或 flag
+- 不要直接调用 `dws.exe`（认证不通）
+- 不要编造 UUID、ID、URL、Email、手机号
+- 不要在 Wukong 未运行时尝试操作（管道不存在会报错）
+- 不要省略 `| Select-Object -First 20`（会导致流阻塞）
+- 不要把 `output_text` 中的内容当作精确 JSON 直接解析（它是自然语言）
 
 ## 产品路由表
 
-> 若用户意图涉及汇总/整理/归纳/分析/报告/多步操作，**先匹配行动指南** (`best_practices/`)；仅当行动指南无匹配且明确是单一产品单步操作时，按触发关键词匹配本表。
+> 用于帮助写出准确的任务描述，匹配后参考对应文档了解该产品能做什么。
 
-| 产品 | 用途 | 参考文件 |
+| 产品 | 关键词 | 参考文件 |
 |---|---|---|
-| `aitable` | AI表格：表格/数据表/字段/记录增删改查 | `products/aitable.md` |
-| `calendar` | 日历：日程/参与者/会议室/闲忙查询 | `products/calendar.md` |
-| `contact` | 通讯录：精确查询/部门查询 | `products/contact.md` |
-| `doc` | 文档：搜索/浏览/读取/创建/更新/块级编辑 | `products/doc.md` |
-| `sheet` | 电子表格：单元格数据读写/追加/公式 | `products/sheet.md` |
-| `chat` | 群聊：群管理/消息/机器人/Webhook | `products/chat.md` |
-| `todo` | 待办：创建/查询/修改/完成/删除 | `products/todo.md` |
-| `mail` | 邮箱：查询/搜索/查看/发送 | `products/mail.md` |
-| `minutes` | AI听记：列表/摘要/转写/关键字 | `products/minutes.md` |
-| `report` | 日志：日报/周报/模版/收件箱 | `products/report.md` |
-| `drive` | 钉盘：浏览/下载/创建/上传 | `products/drive.md` |
-| `ding` | DING消息：发送/撤回 | `products/ding.md` |
-| `oa` | OA审批：待处理/同意/拒绝/撤销 | `products/oa.md` |
-| `attendance` | 考勤：打卡记录/排班查询 | `products/attendance.md` |
-| `wiki` | 知识库：创建/查询/搜索空间 | `products/wiki.md` |
-| `aisearch` | 搜人首选：找同事/谁负责/上下级/查工号/手机号 | `products/aisearch.md` |
-| `aiapp` | AI应用：创建/查询/修改 | `products/aiapp.md` |
-| `conference` | 视频会议：预约会议 | `products/simple.md` |
-| `live` | 直播：查看直播列表 | `products/simple.md` |
-| `skill` | 技能管理：搜索/安装/发布 | `products/simple.md` |
-| `devdoc` | 开放平台文档：搜索开发文档 | `products/simple.md` |
-
-**关键区分**：
-- `aisearch`（搜人首选）vs `contact`（精确按 userId 查）vs `mail`（查邮箱地址）
-- `aitable`（数据表格）vs `doc`（文档编辑）vs `sheet`（电子表格/单元格读写）
-- `report`（钉钉日志/日报）vs `doc`（文档）vs `todo`（待办任务）
-- `drive`（钉盘文件存储）vs `doc`（钉钉文档内容读写）
-- `conference`（视频会议预约）vs `calendar`（日历日程管理）
+| 文档 | 读文档/写文档/知识库/文件夹 | `products/doc.md` |
+| 群聊 | 发消息/建群/拉人/机器人/Webhook | `products/chat.md` |
+| 日历 | 日程/会议室/闲忙/约会 | `products/calendar.md` |
+| 通讯录 | 搜同事/查部门/找负责人/查工号 | `products/aisearch.md` + `products/contact.md` |
+| 待办 | TODO/任务/提醒 | `products/todo.md` |
+| 邮件 | 发邮件/查收件箱 | `products/mail.md` |
+| OA审批 | 审批/待处理/同意/拒绝 | `products/oa.md` |
+| AI表格 | 数据表/字段/记录 | `products/aitable.md` |
+| 电子表格 | 单元格/公式/Sheet | `products/sheet.md` |
+| 考勤 | 打卡/排班/出勤 | `products/attendance.md` |
+| AI听记 | 会议录音/摘要/转写 | `products/minutes.md` |
+| 日志 | 日报/周报/模版 | `products/report.md` |
+| 钉盘 | 上传/下载/文件存储 | `products/drive.md` |
+| 知识库 | Wiki/知识库空间 | `products/wiki.md` |
+| DING消息 | 紧急通知/DING | `products/ding.md` |
+| 视频会议 | 预约会议/视频 | `products/simple.md` |
 
 ## 危险操作确认
 
-以下操作执行前**必须展示摘要并获得用户同意，同意后才加 `--yes`**：
+以下操作在任务描述中出现时，**必须先向用户展示操作摘要并获得明确同意**，确认后再执行：
 
-| 产品 | 命令 | 说明 |
-|---|---|---|
-| `aitable` | `base delete` | 删除整个 AI 表格 |
-| `aitable` | `table delete` | 删除数据表 |
-| `aitable` | `field delete` | 删除字段（不可恢复） |
-| `doc` | `delete` | 删除文档/文件夹 |
-| `chat` | `group dismiss` | 解散群组 |
-| `todo` | `task delete` | 删除待办 |
-| `drive` | `delete` | 删除钉盘文件/文件夹 |
-| `oa` | `approval approve/reject` | 审批通过/拒绝 |
-| `ding` | `send` | 发送 DING 紧急消息 |
+| 操作 | 说明 |
+|---|---|
+| 删除文档/文件夹 | 不可恢复 |
+| 删除 AI 表格/数据表/字段 | 数据不可恢复 |
+| 解散群组 | 不可恢复 |
+| 发送 DING 消息 | 会打扰对方（电话/短信） |
+| 审批同意/拒绝 | 影响业务流程 |
+| 删除钉盘文件 | 不可恢复 |
