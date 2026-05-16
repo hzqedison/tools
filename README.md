@@ -4,6 +4,6 @@
 
 ## 工具列表
 
-| 目录 | 描述 | 平台 |
+| 工具 | 仓库 | 描述 |
 |---|---|---|
-| [dws-skill](./dws-skill/) | 让 Claude Code 直接操作钉钉（读文档、发消息、查日程、审批 OA 等） | Windows |
+| dws-skill | [hzqedison/dingding-dws](https://github.com/hzqedison/dingding-dws) | 让 Claude Code 直接操作钉钉 |
