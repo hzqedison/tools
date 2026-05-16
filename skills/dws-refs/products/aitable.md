@@ -1,0 +1,683 @@
+# AI表格 (aitable) 命令参考
+
+## 文档地址 (URI)
+
+所有 AI 表格操作完成后，可通过以下 URI 直接访问对应文档：
+
+| 资源 | URI 格式 |
+|------|----------|
+| Base 文档 | `https://alidocs.dingtalk.com/i/nodes/{baseId}` |
+| 模板预览 | `https://docs.dingtalk.com/table/template/{templateId}` |
+
+> **操作后请返回文档 URI**：每次执行 base list/search/create/get 操作后，从返回数据中提取 `baseId`，拼接为 `https://alidocs.dingtalk.com/i/nodes/{baseId}` 返回给用户，方便直接点击打开。
+> 补充：该链接是统一 `alidocs` 入口。如果 URL 不是来自 `aitable` 命令返回，而是用户直接贴的原始 `alidocs` URL，先按 [链接规范](../url-patterns.md#alidocs-url-类型探测流程) probe，确认是 `able` 后再按 AI 表格处理。
+
+## 命令总览
+
+### base (Base 管理)
+
+#### 获取 AI 表格列表
+```
+Usage:
+  dws aitable base list [flags]
+Example:
+  dws aitable base list
+  dws aitable base list --limit 5 --cursor NEXT_CURSOR
+Flags:
+      --cursor string   分页游标，首次不传
+      --limit int       每页数量，默认 10，最大 10
+```
+
+返回 baseId 与 baseName。
+
+> 📎 **操作后返回文档链接**：遍历返回的每个 base，拼接 `https://alidocs.dingtalk.com/i/nodes/{baseId}` 返回给用户。
+
+> **重要**：`base list` 仅返回**最近访问过**的 Base，**不是全部 Base**。
+> 如需查找表格，**请优先使用 `base search`**；`base list` 仅作为浏览最近表格的辅助手段。
+> 如果刚创建完，直接使用 `create` 返回的 `baseId` 即可。
+
+#### 搜索 AI 表格
+```
+Usage:
+  dws aitable base search [flags]
+Example:
+  dws aitable base search --query "项目管理"
+Flags:
+      --cursor string   分页游标，首次不传
+      --query string    Base 名称关键词，建议至少 2 个字符 (必填)
+```
+
+#### 获取 AI 表格信息
+```
+Usage:
+  dws aitable base get [flags]
+Example:
+  dws aitable base get --base-id <BASE_ID>
+Flags:
+      --base-id string   Base 唯一标识 (必填)
+```
+
+> **用户提供 URL 时**：如果用户给出了链接如 `https://alidocs.dingtalk.com/i/nodes/ABC123`，请提取末尾的 `ABC123` 作为 `--base-id` 传入。详见下方「URL → baseId 提取」章节。
+> 补充：如果用户直接贴的是原始 `alidocs` URL，而不是 `aitable` 命令返回的结果，先按 [链接规范](../url-patterns.md#alidocs-url-类型探测流程) probe；只有 probe 确认 `extension=able` 后，才继续按 `--base-id` 使用。
+
+返回 baseName、tables、dashboards 的 summary 信息（不含字段与记录详情）。
+后续如需 tableId，优先从这里读取。
+
+>  **文档地址**：`https://alidocs.dingtalk.com/i/nodes/{baseId}`
+
+#### 创建 AI 表格
+```
+Usage:
+  dws aitable base create [flags]
+Example:
+  dws aitable base create --name "项目跟踪"
+Flags:
+      --name string          Base 名称，1-50 字符 (必填)
+      --template-id string   模板 ID (可选，可通过 template search 获取)
+```
+
+>  **创建后直接使用返回的 `baseId`**，无需再调用 `base list` 或 `base search` 查找。
+> 后续可直接 `base get --base-id <返回的baseId>` 获取 tableId，或 `table create --base-id <返回的baseId>` 创建数据表。
+>
+> **文档地址**：`https://alidocs.dingtalk.com/i/nodes/{返回的baseId}`
+
+#### 更新 AI 表格
+```
+Usage:
+  dws aitable base update [flags]
+Example:
+  dws aitable base update --base-id <BASE_ID> --name "新名称"
+Flags:
+      --base-id string   目标 Base ID (必填)
+      --desc string      备注文本
+      --name string      新名称，1-50 字符 (必填)
+```
+
+#### 删除 AI 表格
+```
+Usage:
+  dws aitable base delete [flags]
+Example:
+  dws aitable base delete --base-id <BASE_ID> --yes
+Flags:
+      --base-id string   待删除 Base ID (必填)
+      --reason string    删除原因
+```
+
+高风险操作，不可逆。
+
+### table (数据表管理)
+
+#### 获取数据表
+```
+Usage:
+  dws aitable table get [flags]
+Example:
+  dws aitable table get --base-id <BASE_ID>
+  dws aitable table get --base-id <BASE_ID> --table-ids tbl1,tbl2
+Flags:
+      --base-id string     所属 Base ID (必填)
+      --table-ids string   Table ID 列表，逗号分隔，单次最多 10 个
+```
+
+返回 tableId、tableName、description、fields 目录、views 目录。不传 table-ids 返回全部表。
+
+>  **文档地址**：`https://alidocs.dingtalk.com/i/nodes/{baseId}`
+
+#### 创建数据表
+```
+Usage:
+  dws aitable table create [flags]
+Example:
+  dws aitable table create --base-id <BASE_ID> --name "任务表" \
+    --fields '[{"fieldName":"任务名称","type":"text"},{"fieldName":"优先级","type":"singleSelect","config":{"options":[{"name":"高"},{"name":"中"},{"name":"低"}]}}]'
+Flags:
+      --base-id string   目标 Base ID (必填)
+      --fields string    初始字段 JSON 数组，至少 1 个，单次最多 15 个 (必填)
+      --name string      表格名称，1-100 字符 (必填)，别名: --table-name
+```
+
+>  **创建后直接使用返回的 `tableId`**，无需再调 `table get` 查找。
+> 后续可直接 `field create --table-id <返回的tableId>` 补充字段，或 `record create` 写入数据。
+>
+>  **文档地址**：`https://alidocs.dingtalk.com/i/nodes/{baseId}`
+
+#### 更新数据表
+```
+Usage:
+  dws aitable table update [flags]
+Example:
+  dws aitable table update --base-id <BASE_ID> --table-id <TABLE_ID> --name "新表名"
+Flags:
+      --base-id string    所属 Base ID (必填)
+      --name string       新表名 (必填)
+      --table-id string   目标 Table ID (必填)
+```
+
+#### 删除数据表
+```
+Usage:
+  dws aitable table delete [flags]
+Example:
+  dws aitable table delete --base-id <BASE_ID> --table-id <TABLE_ID> --yes
+Flags:
+      --base-id string    目标 Base ID (必填)
+      --reason string     删除原因
+      --table-id string   将被删除的 Table ID (必填)
+```
+
+不可逆。若为 Base 中最后一张表，删除会失败。
+
+### field (字段管理)
+
+#### 获取字段详情
+```
+Usage:
+  dws aitable field get [flags]
+Example:
+  dws aitable field get --base-id <BASE_ID> --table-id <TABLE_ID>
+  dws aitable field get --base-id <BASE_ID> --table-id <TABLE_ID> --field-ids fld1,fld2
+Flags:
+      --base-id string     Base ID (必填)
+      --field-ids string   字段 ID 列表，逗号分隔，单次最多 10 个
+      --table-id string    Table ID (必填)
+```
+
+返回字段的完整配置（含 options 等）。在 table get 拿到字段目录后，按需展开少量字段的完整配置。
+
+#### 创建字段
+```
+Usage:
+  dws aitable field create [flags]
+Example:
+  dws aitable field create --base-id <BASE_ID> --table-id <TABLE_ID> \
+    --name "状态" --type "singleSelect" --config '{"options":[{"name":"待办"},{"name":"进行中"},{"name":"已完成"}]}'
+  
+  # 或者使用批量创建模式:
+  dws aitable field create --base-id <BASE_ID> --table-id <TABLE_ID> \
+    --fields '[{"fieldName":"状态","type":"singleSelect","config":{"options":[{"name":"待办"}]}}]'
+Flags:
+      --base-id string    Base ID (必填)
+      --name string       要创建的单字段名称（与 --type 配合使用，替代 --fields）
+      --type string       要创建的单字段类型（参考 table create 字段类型）
+      --config string     单字段配置，如 options（可选）
+      --ai-config string  单字段 AI 配置 JSON（可选，用于创建 AI 字段）
+      --fields string     批量新增字段 JSON 数组，单次最多 15 个 (与 --name/--type 二选一)
+      --table-id string   Table ID (必填)
+```
+
+允许部分成功，返回结果逐项标明成功/失败状态。
+
+#### AI 字段创建示例（可直接复用）
+
+```bash
+dws aitable field create --base-id <BASE_ID> --table-id <TABLE_ID> \
+  --name "AI摘要" --type text \
+  --ai-config '{
+    "outputType":"text",
+    "prompt":[
+      {"type":"text","value":"请将下面内容总结成不超过80字的中文摘要："},
+      {"type":"fieldRef","fieldId":"fld_content"}
+    ],
+    "autoRecompute":true,
+    "enableWebSearch":false,
+    "enableThinking":true
+  }' --format json
+```
+
+说明：
+- `outputType` 与字段类型需一致（如 `outputType=text` 配 `--type text`）
+- `prompt` 里通过 `fieldRef` 引用已有字段（示例中的 `fld_content`）
+- `autoRecompute=true` 表示引用字段变化后自动重算
+
+#### 更新字段
+```
+Usage:
+  dws aitable field update [flags]
+Example:
+  dws aitable field update --base-id <BASE_ID> --table-id <TABLE_ID> --field-id <FIELD_ID> --name "新字段名"
+  dws aitable field update --base-id <BASE_ID> --table-id <TABLE_ID> --field-id <FIELD_ID> --config '{"options":[{"name":"A"},{"name":"B"}]}'
+Flags:
+      --base-id string    Base ID (必填)
+      --config string     字段配置 JSON (不修改时省略)
+      --ai-config string  AI 配置 JSON (不修改时省略)
+      --field-id string   Field ID (必填)
+      --name string       新字段名称 (不修改时省略)
+      --table-id string   Table ID (必填)
+```
+
+不可变更字段类型。更新 singleSelect/multipleSelect 的 options 时需传入完整列表，已有选项应回传原 id。
+`--name` / `--config` / `--ai-config` 至少传一个。
+
+#### AI 字段更新示例（可直接复用）
+
+```bash
+dws aitable field update --base-id <BASE_ID> --table-id <TABLE_ID> --field-id <FIELD_ID> \
+  --ai-config '{
+    "outputType":"text",
+    "prompt":[
+      {"type":"text","value":"请提炼3个要点，每点不超过20字："},
+      {"type":"fieldRef","fieldId":"fld_content"}
+    ],
+    "autoRecompute":true,
+    "enableWebSearch":false,
+    "enableThinking":true
+  }' --format json
+```
+
+#### 删除字段
+```
+Usage:
+  dws aitable field delete [flags]
+Example:
+  dws aitable field delete --base-id <BASE_ID> --table-id <TABLE_ID> --field-id <FIELD_ID> --yes
+Flags:
+      --base-id string    Base ID (必填)
+      --field-id string   待删除字段 ID (必填)
+      --table-id string   Table ID (必填)
+```
+
+不可逆。禁止删除主字段和最后一个字段。
+
+### view (视图管理)
+
+> **典型用途**：调整字段在视图中的**显示顺序与可见性**、配置筛选/排序/分组。
+> "移动字段/调整字段顺序"在 AI 表格里**没有 `field reorder`/`field move` 命令**，必须通过 `view update` 的 `visibleFieldIds` 完成（视图层重排）。
+
+#### 获取视图详情
+```
+Usage:
+  dws aitable view get [flags]
+Example:
+  dws aitable view get --base-id <BASE_ID> --table-id <TABLE_ID>
+  dws aitable view get --base-id <BASE_ID> --table-id <TABLE_ID> --view-ids viw1,viw2
+Flags:
+      --base-id string    Base ID (必填)
+      --table-id string   Table ID (必填)
+      --view-ids string   视图 ID 列表，逗号分隔，单次最多 10 个；不传返回当前表全部视图
+```
+
+返回视图的列顺序、筛选、排序、分组等完整配置。`viewId` 可从 `table get` 的 `views` 目录拿到。
+
+#### 创建视图
+```
+Usage:
+  dws aitable view create [flags]
+Example:
+  dws aitable view create --base-id <BASE_ID> --table-id <TABLE_ID> --view-type Grid --name "进度看板"
+Flags:
+      --base-id string    Base ID (必填)
+      --table-id string   Table ID (必填)
+      --view-type string  视图类型：Grid/FormDesigner/Gantt/Calendar/Kanban/Gallery (必填)
+      --name string       视图名称（不传时系统自动生成）
+      --desc string       视图描述 JSON
+      --config string     视图配置 JSON（visibleFieldIds/filter/sort/group 等）
+```
+
+#### 更新视图（调整字段顺序的入口）
+```
+Usage:
+  dws aitable view update [flags]
+Example:
+  # 重排视图字段顺序（首列主字段必须放在第一位）
+  dws aitable view update --base-id <BASE_ID> --table-id <TABLE_ID> --view-id <VIEW_ID> \
+    --config '{"visibleFieldIds":["fldPrimary","fldStatus","fldOwner","fldDueDate"]}'
+
+  # 重命名视图
+  dws aitable view update --base-id <BASE_ID> --table-id <TABLE_ID> --view-id <VIEW_ID> --name "新视图名"
+Flags:
+      --base-id string    Base ID (必填)
+      --table-id string   Table ID (必填)
+      --view-id string    View ID (必填)
+      --name string       新视图名称（不修改时省略）
+      --desc string       新的视图描述 JSON
+      --config string     视图配置 JSON：visibleFieldIds/filter/sort/group/fieldWidths（仅 Grid）
+```
+
+#### 删除视图
+```
+Usage:
+  dws aitable view delete [flags]
+Example:
+  dws aitable view delete --base-id <BASE_ID> --table-id <TABLE_ID> --view-id <VIEW_ID> --yes
+```
+
+> 不可删除最后一个视图，也不可删除锁定视图。
+
+### record (记录管理)
+
+#### 查询记录
+```
+Usage:
+  dws aitable record query [flags]
+Example:
+  dws aitable record query --base-id <BASE_ID> --table-id <TABLE_ID>
+  dws aitable record query --base-id <BASE_ID> --table-id <TABLE_ID> --record-ids rec1,rec2
+  dws aitable record query --base-id <BASE_ID> --table-id <TABLE_ID> --query "关键词" --limit 50
+Flags:
+      --base-id string      Base ID (必填)
+      --cursor string       分页游标，首次不传
+      --field-ids string    返回字段 ID 列表，逗号分隔，单次最多 100 个
+      --filters string      结构化过滤条件 JSON
+      --query string      全文关键词搜索
+      --limit int           单次最大记录数，默认 100，最大 100
+      --record-ids string   指定记录 ID 列表，逗号分隔，单次最多 100 个
+      --sort string         排序条件 JSON 数组
+      --table-id string     Table ID (必填)
+```
+
+两种模式: 按 ID 取（传 record-ids，忽略 filters/sort）或条件查（filters+sort+cursor 分页）。
+
+> **排序参数规范（关键）**：`--sort` 需要传 JSON 数组，排序方向字段必须是 `direction`（`asc` 或 `desc`），不要使用 `order`。
+>
+> 正确示例：
+> `--sort '[{"fieldId":"wm8ns9bw2vmucb45xj3ix","direction":"desc"}]'`
+
+filters 结构：`{"operator":"and|or","operands":[{"operator":"<op>","operands":["<fieldId>","<value>"]}]}`
+
+>  **singleSelect/multipleSelect 过滤**：filters 中可传 option id 或 option name，但建议优先用 **option id**（通过 `field get` 获取），更可靠。
+> 写入时（record create/update）可直接传 option name。
+
+>  **减少响应体积**：字段较多时，用 `--field-ids` 仅返回需要的字段，可显著减少返回数据量。
+
+#### 新增记录
+```
+Usage:
+  dws aitable record create [flags]
+Example:
+  dws aitable record create --base-id <BASE_ID> --table-id <TABLE_ID> \
+    --records '[{"cells":{"fldTextId":"文本内容","fldNumId":123}}]'
+Flags:
+      --base-id string    Base ID (必填)
+      --records string    记录列表 JSON 数组，单次最多 100 条 (必填)
+      --table-id string   Table ID (必填)
+```
+
+> ️ **常见错误（严格避免）**：
+> - **参数名是 `--records`**，不是 `--data`
+> - **cells 的 key 必须是 fieldId**（如 `fldXXX`），**不是字段名称**（如 `"课程名称"`）
+> - 必须先 `table get` 获取 fieldId，再写入记录
+
+```bash
+# 正确流程：先获取 fieldId
+dws aitable table get --base-id <BASE_ID> --table-id <TABLE_ID> --format json
+# 从返回中提取 fieldId（如 fldABC123）
+
+# 再用 fieldId 写入记录
+dws aitable record create --base-id <BASE_ID> --table-id <TABLE_ID> \
+  --records '[{"cells":{"fldABC123":"Python入门"}}]' --format json
+```
+
+#### 更新记录
+```
+Usage:
+  dws aitable record update [flags]
+Example:
+  dws aitable record update --base-id <BASE_ID> --table-id <TABLE_ID> \
+    --records '[{"recordId":"recXXX","cells":{"fldStatusId":"已完成"}}]'
+Flags:
+      --base-id string    Base ID (必填)
+      --records string    待更新记录 JSON 数组，单次最多 100 条 (必填)
+      --table-id string   Table ID (必填)
+```
+
+只需传入需修改的字段，未传入的保持原值。每条记录必须含 recordId 和 cells。
+
+#### 删除记录
+```
+Usage:
+  dws aitable record delete [flags]
+Example:
+  dws aitable record delete --base-id <BASE_ID> --table-id <TABLE_ID> --record-ids rec1,rec2 --yes
+Flags:
+      --base-id string      Base ID (必填)
+      --record-ids string   待删除记录 ID 列表，逗号分隔，最多 100 条 (必填)
+      --table-id string     Table ID (必填)
+```
+
+不可逆。调用前建议先 record query 确认目标记录。
+
+### attachment (附件管理)
+
+>  **STOP — 不要使用钉盘 (drive) 上传！** 钉盘 fileId 无法写入 attachment 字段。必须使用以下流程。
+
+#### 准备附件上传
+```
+Usage:
+  dws aitable attachment upload [flags]
+Example:
+  dws aitable attachment upload --base-id <BASE_ID> --file-name report.xlsx --size 204800
+  dws aitable attachment upload --base-id <BASE_ID> --file-name photo.png --size 1024 --mime-type image/png
+Flags:
+      --base-id string     Base ID (必填)
+      --file-name string   文件名，必须含扩展名 (必填)
+      --size int           文件大小（字节），>0 (必填)
+      --mime-type string   MIME type（不传时根据扩展名推断）
+```
+
+#### 附件上传完整流程（推荐：使用脚本，2 步完成）
+
+```bash
+# 步骤 1: 使用脚本一键上传（内部自动完成 prepare + PUT）
+python3 scripts/upload_attachment.py <BASE_ID> /path/to/report.pdf
+# 输出: { "fileToken": "ft_xxx", "fileName": "report.pdf", "size": 204800 }
+
+# 步骤 2: 在 record create/update 中使用 fileToken 写入
+dws aitable record create --base-id <BASE_ID> --table-id <TABLE_ID> \
+  --records '[{"cells":{"fldAttachId":[{"fileToken":"ft_xxx"}]}}]' --format json
+```
+
+>  `uploadUrl` 有时效性（`expiresAt`），脚本会自动在获取后立即上传。
+
+### template (模板搜索)
+
+#### 搜索模板
+```
+Usage:
+  dws aitable template search [flags]
+Example:
+  dws aitable template search --query "项目管理"
+Flags:
+      --cursor string   分页游标，首次不传
+      --limit int       每页返回数量，默认 10，最大 30
+      --query string    模板名称关键词 (必填)
+```
+
+返回 templateId 可用于 `base create --template-id`。
+
+>  **模板预览地址**：`https://docs.dingtalk.com/table/template/{templateId}`
+
+## 复杂操作
+
+### 仪表盘 / 图表（建议顺序）
+
+```bash
+# 1) 先看配置模板（JSONC）
+dws aitable dashboard config-example --format json
+dws aitable chart widgets-example --format json
+
+# 2) 先拿 dashboard，再拿 chart 详情
+dws aitable dashboard get --base-id <BASE_ID> --dashboard-id <DASHBOARD_ID> --format json
+dws aitable chart get --base-id <BASE_ID> --dashboard-id <DASHBOARD_ID> --chart-id <CHART_ID> --format json
+```
+
+要点：
+
+- `dashboard get` 返回的 `charts[].chartId` 可直接给 `chart get` 使用。
+- `dashboard share get` 可能返回 `404`（资源不存在或未开通），需按可重试错误处理，不要误判为参数拼错。
+- `chart share get` 可正常返回 `enabled/shareUrl`，用于分享状态判断。
+
+### 导出数据（两阶段轮询）
+
+`export data` 常见为异步任务：首次调用可能只返回 `taskId`，需要继续轮询。
+
+```bash
+# 第一步：创建任务（按 scope 传必要参数）
+dws aitable export data --base-id <BASE_ID> --scope table --table-id <TABLE_ID> --format excel --timeout-ms 1000
+
+# 第二步：拿 taskId 继续轮询，直到返回 downloadUrl
+dws aitable export data --base-id <BASE_ID> --task-id <TASK_ID> --timeout-ms 3000
+```
+
+参数约束
+
+- `scope=all`：只需 `base-id`
+- `scope=table`：必须 `table-id`
+- `scope=view`：必须同时 `table-id + view-id`
+
+## 意图判断
+
+用户说"表格/多维表/AI表格":
+- 查看/查找/列表 → `base search`（优先）或 `base list`（仅浏览最近访问）
+- 搜索 → `base search`
+- 详情 → `base get`
+- 创建 → `base create`
+- 修改 → `base update`
+- 删除 → `base delete` [危险]
+
+用户说"数据表/子表/table":
+- 查看 → `table get`
+- 创建 → `table create`
+- 重命名 → `table update`
+- 删除 → `table delete` [危险]
+
+用户说"字段/列/column":
+- 查看 → `field get`
+- 添加 → `field create`
+- 修改 → `field update`
+- 删除 → `field delete` [危险]
+
+用户说"记录/行/数据/row":
+- 查看/搜索 → `record query`（先 `table get` 获取 fieldId）
+- 添加/写入 → `record create`（先 `table get` 必须!）
+- 修改/更新 → `record update`（需 recordId，先 `record query`）
+- 删除 → `record delete` [危险]（需 recordId）
+
+用户说"模板" → `template search`
+
+关键区分: base=表格文件, table=数据表, field=列, record=行
+
+## 核心工作流
+
+```bash
+# 1. 搜索/列出 Base — 提取 baseId
+dws aitable base search --query "项目" --format json
+
+# 2. 获取 Base 信息 — 提取 tableId
+dws aitable base get --base-id <BASE_ID> --format json
+
+# 3. 获取表结构 — 提取 fieldId
+dws aitable table get --base-id <BASE_ID> --table-id <TABLE_ID> --format json
+
+# 4. 查询记录
+dws aitable record query --base-id <BASE_ID> --table-id <TABLE_ID> --format json
+
+# 5. 新增记录 (cells 用 fieldId 作 key)
+dws aitable record create --base-id <BASE_ID> --table-id <TABLE_ID> \
+  --records '[{"cells":{"fldXXX":"值"}}]' --format json
+```
+
+## 上下文传递表
+
+| 操作 | 从返回中提取 | 用于 |
+|------|-------------|------|
+| `base list/search` | `baseId` | 所有后续命令的 --base-id，拼接文档 URI |
+| `base create` | `baseId` | 后续命令 + 文档 URI |
+| `base get` | `tables[].tableId` | --table-id |
+| `table get` | `fields[].fieldId` | record 操作的 cells key, field get/update/delete |
+| `record query` | `recordId` | record update/delete |
+| `template search` | `templateId` | base create --template-id，拼接模板预览 URI |
+
+## 注意事项
+
+- 所有操作使用 ID（baseId/tableId/fieldId/recordId），不使用名称
+- records 的 cells key 是 fieldId，不是字段名称
+
+## `--filters` 筛选语法排错与使用规范 ( 极易出错)
+
+调用 `record query` 时，如果条件筛选**完全失效（查询返回了所有记录）**，通常是因为 `--filters` JSON 语法错误，API 默默丢弃了不合规的 filter。
+
+**强制规则：**
+1. **根节点必须是逻辑操作符**：`"operator"` 必须是 `"and"` 或 `"or"`，不能是 `"eq"` 等比较操作符。
+2. 比较操作必须放在根节点的 `"operands"` 数组内的对象中。
+3. `singleSelect` 和 `multipleSelect` 字段，推荐使用 **选项的 exact String 名称 (name)** 作为比较值，而不是 ID。
+4. **内层比较操作符语义**：支持 `eq`(等于)、`not_eq`(不等于)、`contain`(包含/模糊搜索)、`not_contain`(不包含)、`gt/gte`(大于/大于等于)、`lt/lte`(小于/小于等于)、`is_empty/is_not_empty`(为空/不为空，对应 operands 内只传单个 fieldId)。
+
+ **精简防呆模板与 4 种衍生情况**
+```json
+{
+  "operator": "and",       // 情况 4 (OR 查询): 这里改为 "or"
+  "operands": [
+    {
+      "operator": "eq",    // 情况 3 (文本包含): 这里改为 "contain"
+      "operands": ["fld_state", "进行中"] // 情况 1 (基础等于)
+    }
+    // 情况 2 (多条件 AND): 在此行增加类似 {"operator":"eq","operands":["fld_priority","高"]}
+  ]
+}
+```
+
+ **错误示例 1：缺失根节点 and/or** (API 将忽略该 filter，返回全表)
+```json
+{"operator":"eq","operands":["fldXXX","本科"]}
+```
+
+ **错误示例 2：传入选项 ID 而非名称** (可能导致匹配不到 0 记录)
+```json
+{"operator":"and","operands":[{"operator":"eq","operands":["fldXXX","CXzrOHK9JI"]}]}
+```
+
+## URL → baseId 提取
+
+用户经常通过钉钉链接指定表格，链接格式为：
+
+```
+https://alidocs.dingtalk.com/i/nodes/{baseId}
+https://alidocs.dingtalk.com/i/nodes/{baseId}?xxx=yyy
+```
+
+**处理规则**（必须严格遵守）：
+1. 当用户提供了包含 `alidocs.dingtalk.com/i/nodes/` 的 URL 时，提取 `/nodes/` 后的路径段作为 `baseId`
+2. 去掉尾部的查询参数（`?` 及其后内容）和尾部斜杠
+3. 将提取得到的 ID 传入 `--base-id` 参数
+
+**示例**：
+```
+用户输入：帮我查看 https://alidocs.dingtalk.com/i/nodes/ABC123XYZ 这个表格
+→ 提取 baseId = ABC123XYZ
+→ 执行: dws aitable base get --base-id ABC123XYZ --format json
+```
+
+> **注意**：URL 中的 nodeId 在 AI 表格场景下等同于 `baseId`，可以直接作为 `--base-id` 使用。
+> 补充：如果该 URL / `baseId` 来自 `dws aitable base list/search/create/get` 返回，或已在当前链路 probe 过，则可直接复用；如果是用户直接提供的原始 `alidocs` URL，则先按 [链接规范](../url-patterns.md#alidocs-url-类型探测流程) probe，确认 `extension=able` 后再继续按 AI 表格处理。
+
+### cells 写入/读取格式速查
+
+| 字段类型 | 写入格式 | 读取返回格式 |
+|---------|---------|------------|
+| text | `"字符串"` | `"字符串"` |
+| number | `123` | `"123"` |
+| singleSelect | `"选项名"` 或 `{"id":"xxx"}` | `{"id":"xxx","name":"选项名"}` |
+| multipleSelect | `["选项A","选项B"]` | `[{"id":"x","name":"选项A"},...]` |
+| date | `"2026-03-13"` 或时间戳 | ISO 日期字符串 |
+| checkbox | `true`/`false` | `true`/`false` |
+| user | `[{"userId":"xxx"}]` | `[{"corpId":"xxx","userId":"xxx"}]` |
+| attachment | `[{"fileToken":"ft_xxx"}]` 需先走 attachment upload 3步流程 | `[{"url":"...","filename":"...","size":N}]` |
+| url | `{"text":"显示文本","link":"https://..."}` | 同写入 |
+| richText | `{"markdown":"**加粗**"}` | `{"markdown":"..."}` |
+| group | `[{"cid":"xxx"}]` (注意: key 是 cid，不是 openConversationId) | 同写入 |
+
+- 详见 [field-rules.md](../field-rules.md) 和 [error-codes.md](../error-codes.md)
+
+## 自动化脚本
+
+| 脚本 | 场景 | 用法 |
+|------|------|------|
+| [bulk_add_fields.py](../../scripts/bulk_add_fields.py) | 批量添加字段到数据表 | `python bulk_add_fields.py --base-id <ID> --table-id <ID> --fields fields.json` |
+| [import_records.py](../../scripts/import_records.py) | 从 JSON/CSV 批量导入记录 | `python import_records.py --base-id <ID> --table-id <ID> --file data.json` |
+| [aitable_export_via_task.py](../../scripts/aitable_export_via_task.py) | 文件导出任务（export_data 轮询 + 下载） | `python aitable_export_via_task.py <baseId> --scope table --table-id <tableId>` |
+| [upload_attachment.py](../../scripts/upload_attachment.py) | 上传附件到 AI 表格记录 | `python upload_attachment.py --base-id <ID> --file image.png` |
+
+## 相关产品
+
+- [doc](./doc.md) — 富文本文档编辑，不是结构化数据表格
