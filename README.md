@@ -1,9 +1,9 @@
 # tools
 
-个人工具集合，适用于 Claude Code 及效率工具场景。
+适用于 Claude Code 的效率工具集合。
 
 ## 工具列表
 
-| 目录 | 描述 |
-|---|---|
-| [dws-skill](./dws-skill/) | 让 Claude Code 直接操作钉钉的 Skill |
+| 目录 | 描述 | 平台 |
+|---|---|---|
+| [dws-skill](./dws-skill/) | 让 Claude Code 直接操作钉钉（读文档、发消息、查日程、审批 OA 等） | Windows |
