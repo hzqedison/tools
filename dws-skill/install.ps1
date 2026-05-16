@@ -1,8 +1,8 @@
 # DWS Skill 安装脚本 for Claude Code
-# 用法: irm https://raw.githubusercontent.com/hzqedison/dws-skill/main/install.ps1 | iex
+# 用法: irm https://raw.githubusercontent.com/hzqedison/tools/main/dws-skill/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
-$repo = "hzqedison/dws-skill"
+$repo = "hzqedison/tools"
 $skillDir = Join-Path $env:USERPROFILE ".claude\skills"
 $tmpDir = Join-Path $env:TEMP "dws-skill-install"
 
@@ -29,7 +29,7 @@ try {
 # 解压
 if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force }
 Expand-Archive -Path $zipPath -DestinationPath $tmpDir -Force
-$srcDir = Join-Path $tmpDir "dws-skill-main\skills"
+$srcDir = Join-Path $tmpDir "tools-main\dws-skill\skills"
 
 # 复制文件（覆盖已有版本）
 Write-Host ">>> 安装中..."

@@ -11,7 +11,7 @@
 在 PowerShell 中运行：
 
 ```powershell
-irm https://raw.githubusercontent.com/hzqedison/dws-skill/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/hzqedison/tools/main/dws-skill/install.ps1 | iex
 ```
 
 脚本会自动下载并安装到 `~/.claude/skills/`。
